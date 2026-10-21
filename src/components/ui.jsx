@@ -4,12 +4,14 @@ import { copyText, getClipboardSec } from '../lib/misc'
 import { strength } from '../lib/strength'
 
 const ToastCtx = createContext(() => {})
+// Prévenu à chaque copie (sert au tri « Plus utilisés »)
+export const CopyUsedCtx = createContext(null)
 
 export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([])
   const push = useCallback((msg, kind = 'ok') => {
     const id = Math.random()
-    setToasts((t) => [...t, { id, msg, kind }])
+    setToasts((t) => (t.some((x) => x.msg === msg) ? t : [...t, { id, msg, kind }]))
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800)
   }, [])
   return (
@@ -48,6 +50,7 @@ export function Splash() {
 
 export function CopyButton({ value, label = 'Copier', secret = false, text }) {
   const toast = useToast()
+  const onUsed = useContext(CopyUsedCtx)
   const [done, setDone] = useState(false)
   return (
     <button
@@ -59,6 +62,7 @@ export function CopyButton({ value, label = 'Copier', secret = false, text }) {
       onClick={async () => {
         try {
           await copyText(value, secret)
+          onUsed?.()
           setDone(true)
           setTimeout(() => setDone(false), 1200)
           const sec = getClipboardSec()

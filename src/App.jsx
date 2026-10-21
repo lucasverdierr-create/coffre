@@ -4,6 +4,7 @@ import { deriveKey, decryptJSON, newSalt, toB64, fromB64, ITERATIONS, seal, open
 import { loadLocal, saveLocal, clearLocal, fetchRemote, pushRemote } from './lib/storage'
 import { initialVault, mergeVaults, DEFAULT_SETTINGS } from './lib/vault'
 import { setClipboardSec, applyTheme, downloadFile, today } from './lib/misc'
+import { disableBio } from './lib/biometric'
 import { AuthScreen, RecoveryScreen } from './components/AuthScreen'
 import UnlockScreen from './components/UnlockScreen'
 import Vault from './components/Vault'
@@ -65,7 +66,7 @@ function Root() {
           offline = true
         }
       }
-      if (alive) setProbe({ local, remote, offline })
+      if (alive) setProbe({ local, remote, offline, n: Date.now() })
     })()
     return () => {
       alive = false
@@ -185,6 +186,7 @@ function Root() {
     }
     clearTimeout(timerRef.current)
     keyRef.current = null
+    setProbe(null)
     setVaultState(null)
     setLockReason(reason)
     setSync((s) => ({ ...s, state: cloudEnabled ? 'idle' : 'local' }))
@@ -234,14 +236,21 @@ function Root() {
     toast('Coffre créé et chiffré')
   }
 
-  async function changeMaster(oldPw, newPw) {
+  async function verifyMaster(pw) {
     const cur = keyRef.current
-    const test = await deriveKey(oldPw, fromB64(cur.salt), cur.iter)
+    const test = await deriveKey(pw, fromB64(cur.salt), cur.iter)
     try {
       await decryptJSON(test, await sealCurrent(vaultRef.current))
     } catch {
-      throw new Error('Mot de passe maître actuel incorrect.')
+      throw new Error('Mot de passe maître incorrect.')
     }
+  }
+
+  async function changeMaster(oldPw, newPw) {
+    await verifyMaster(oldPw).catch(() => {
+      throw new Error('Mot de passe maître actuel incorrect.')
+    })
+    disableBio(uidRef.current) // l'ancien mot de passe ne doit plus pouvoir être restitué par Face ID
     const salt = toB64(newSalt())
     keyRef.current = { key: await deriveKey(newPw, fromB64(salt), ITERATIONS), salt, iter: ITERATIONS }
     await persist({ ...vaultRef.current })
@@ -272,6 +281,7 @@ function Root() {
     const id = uidRef.current
     await lock()
     clearLocal(id)
+    disableBio(id)
     if (cloudEnabled) await supabase.auth.signOut()
     else setProbe({ local: null, remote: null, offline: false })
     toast('Données de cet appareil effacées')
@@ -326,7 +336,9 @@ function Root() {
     if (!probe) return <Splash />
     return (
       <UnlockScreen
+        key={probe.n || 0}
         probe={probe}
+        uid={uid}
         reason={lockReason}
         account={session?.user?.email}
         onUnlock={unlock}
@@ -341,7 +353,7 @@ function Root() {
       vault={vault}
       update={update}
       lock={() => lock()}
-      ctx={{ cloud: cloudEnabled, sync, syncNow, account: session?.user?.email, signOut, forgetDevice, changeMaster, exportBackup, importBackup }}
+      ctx={{ cloud: cloudEnabled, uid, verifyMaster, sync, syncNow, account: session?.user?.email, signOut, forgetDevice, changeMaster, exportBackup, importBackup }}
     />
   )
 }

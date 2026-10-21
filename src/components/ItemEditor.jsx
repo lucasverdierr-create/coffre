@@ -5,6 +5,8 @@ import { generatePassword } from '../lib/generator'
 import { renderMarkdown } from '../lib/misc'
 import { parseTotp, base32Decode } from '../lib/totp'
 import { PasswordField, StrengthMeter, RevealButton } from './ui'
+import { CATEGORIES, CATEGORY, detect } from '../lib/categories'
+import Avatar from './Avatar'
 
 export default function ItemEditor({ item, allTags, onSave, onCancel }) {
   const [d, setD] = useState(item)
@@ -45,6 +47,7 @@ export default function ItemEditor({ item, allTags, onSave, onCancel }) {
   return (
     <form className="detail editor" onSubmit={submit} onKeyDown={onKeyDown}>
       <header className="detail-head">
+        <Avatar item={d} size={44} />
         <div className="detail-title">
           <small>{isNew ? 'Nouveau' : 'Modifier'} · {TYPES[d.type].label}</small>
           <input className="title-input" value={d.title} onChange={(e) => set('title', e.target.value)} placeholder="Titre" autoFocus={isNew} />
@@ -141,6 +144,14 @@ export default function ItemEditor({ item, allTags, onSave, onCancel }) {
             )}
           </div>
         )}
+
+        <label>
+          Catégorie
+          <select className="full" value={d.category || ''} onChange={(e) => set('category', e.target.value)}>
+            <option value="">Automatique · {CATEGORY[detect({ ...d, tags: currentTags }).category].label}</option>
+            {CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        </label>
 
         <label>
           Tags <small className="help">séparés par des virgules</small>

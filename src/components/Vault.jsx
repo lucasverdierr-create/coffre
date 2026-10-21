@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   KeyRound, StickyNote, Terminal, LockKeyhole, Star, Trash2, Search, Plus, Layers, Sparkles, HeartPulse,
-  Settings as SettingsIcon, Lock, Tag, Cloud, CloudOff, RefreshCw, HardDrive, Menu, X,
+  Settings as SettingsIcon, Lock, Tag, Cloud, CloudOff, RefreshCw, HardDrive, Menu, X, ArrowUpDown, Rows3,
 } from 'lucide-react'
+import { CATEGORIES, CATEGORY, categoryOf } from '../lib/categories'
+import Avatar from './Avatar'
 import { TYPES, newItem, searchText, subtitle, mergeVaults } from '../lib/vault'
 import { timeAgo } from '../lib/misc'
 import { Logo, Empty, useToast } from './ui'
@@ -14,6 +16,17 @@ import SettingsView from './SettingsView'
 
 export const TYPE_ICONS = { login: KeyRound, note: StickyNote, snippet: Terminal, secret: LockKeyhole }
 const TOOLS = ['generator', 'health', 'settings']
+const collator = new Intl.Collator('fr', { sensitivity: 'base', numeric: true })
+const SORTS = {
+  recent: { label: 'Récents', fn: (a, b) => b.updatedAt - a.updatedAt },
+  az: { label: 'A → Z', fn: (a, b) => collator.compare(a.title || '', b.title || '') },
+  used: { label: 'Plus utilisés', fn: (a, b) => (b.uses || 0) - (a.uses || 0) || (b.lastUsedAt || 0) - (a.lastUsedAt || 0) || b.updatedAt - a.updatedAt },
+}
+const GROUPS = { none: 'Sans groupe', category: 'Par catégorie', letter: 'Par lettre' }
+const letterOf = (t) => {
+  const c = (t || '#').normalize('NFD').replace(/[\u0300-\u036f]/g, '')[0]?.toUpperCase() || '#'
+  return /[A-Z]/.test(c) ? c : '#'
+}
 
 export default function Vault({ vault, update, lock, ctx }) {
   const toast = useToast()
@@ -32,6 +45,10 @@ export default function Vault({ vault, update, lock, ctx }) {
   const counts = useMemo(() => {
     const c = { all: live.length, fav: live.filter((i) => i.favorite).length, trash: trash.length }
     Object.keys(TYPES).forEach((t) => (c[t] = live.filter((i) => i.type === t).length))
+    live.forEach((i) => {
+      const k = `cat:${categoryOf(i)}`
+      c[k] = (c[k] || 0) + 1
+    })
     return c
   }, [vault])
 
@@ -47,15 +64,34 @@ export default function Vault({ vault, update, lock, ctx }) {
     return new Set([...byPw.values()].filter((a) => a.length > 1).flat())
   }, [vault])
 
+  const sortKey = SORTS[vault.settings?.listSort] ? vault.settings.listSort : 'recent'
+  const groupKey = GROUPS[vault.settings?.listGroup] ? vault.settings.listGroup : 'none'
+
   const list = useMemo(() => {
     let base = view === 'trash' ? trash : live
     if (view === 'fav') base = base.filter((i) => i.favorite)
     else if (TYPES[view]) base = base.filter((i) => i.type === view)
     else if (view.startsWith('tag:')) base = base.filter((i) => i.tags?.includes(view.slice(4)))
+    else if (view.startsWith('cat:')) base = base.filter((i) => categoryOf(i) === view.slice(4))
     const q = query.trim().toLowerCase()
-    if (q) base = (view === 'trash' ? trash : live).filter((i) => searchText(i).includes(q))
-    return [...base].sort((a, b) => (view === 'trash' ? b.deletedAt - a.deletedAt : +!!b.favorite - +!!a.favorite || b.updatedAt - a.updatedAt))
-  }, [vault, view, query])
+    if (q) base = (view === 'trash' ? trash : live).filter((i) => searchText(i).includes(q) || CATEGORY[categoryOf(i)].label.toLowerCase().includes(q))
+    const fn = SORTS[sortKey].fn
+    if (view === 'trash') return [...base].sort((a, b) => b.deletedAt - a.deletedAt)
+    return [...base].sort((a, b) => (groupKey === 'none' ? +!!b.favorite - +!!a.favorite : 0) || fn(a, b))
+  }, [vault, view, query, sortKey, groupKey])
+
+  const groups = useMemo(() => {
+    if (groupKey === 'none' || view === 'trash' || view.startsWith('cat:') && groupKey === 'category') return [[null, list]]
+    const m = new Map()
+    for (const i of list) {
+      const k = groupKey === 'category' ? categoryOf(i) : letterOf(i.title)
+      m.set(k, [...(m.get(k) || []), i])
+    }
+    const keys = [...m.keys()]
+    if (groupKey === 'category') keys.sort((a, b) => CATEGORIES.findIndex((c) => c.id === a) - CATEGORIES.findIndex((c) => c.id === b))
+    else keys.sort((a, b) => (a === '#' ? 1 : b === '#' ? -1 : a.localeCompare(b)))
+    return keys.map((k) => [groupKey === 'category' ? CATEGORY[k].label : k, m.get(k)])
+  }, [list, groupKey, view])
 
   const selected = items.find((i) => i.id === selectedId)
   const isTool = TOOLS.includes(view)
@@ -129,11 +165,12 @@ export default function Vault({ vault, update, lock, ctx }) {
     setSelectedId(copy.id)
     toast('Dupliqué')
   }
+  const markUsed = (id) => update((v) => ({ ...v, items: v.items.map((i) => (i.id === id ? { ...i, uses: (i.uses || 0) + 1, lastUsedAt: now() } : i)) }))
   const importItems = (newItems) => update((v) => mergeVaults(v, { items: newItems }))
   const updateSettings = (patch) => update((v) => ({ ...v, settings: { ...v.settings, ...patch }, settingsUpdatedAt: now() }))
 
   // ---------- Rendu ----------
-  const title = view === 'all' ? 'Tout le coffre' : view === 'fav' ? 'Favoris' : view === 'trash' ? 'Corbeille' : TYPES[view]?.plural || (view.startsWith('tag:') ? `#${view.slice(4)}` : '')
+  const title = view === 'all' ? 'Tout le coffre' : view === 'fav' ? 'Favoris' : view === 'trash' ? 'Corbeille' : TYPES[view]?.plural || (view.startsWith('tag:') ? `#${view.slice(4)}` : view.startsWith('cat:') ? CATEGORY[view.slice(4)]?.label : '')
 
   const NavBtn = ({ id, icon: Icon, label, count }) => (
     <button className={`nav-item ${view === id ? 'active' : ''}`} onClick={() => go(id)}>
@@ -156,9 +193,17 @@ export default function Vault({ vault, update, lock, ctx }) {
         <nav>
           <NavBtn id="all" icon={Layers} label="Tout" count={counts.all} />
           <NavBtn id="fav" icon={Star} label="Favoris" count={counts.fav} />
-          <div className="nav-sep">Catégories</div>
+          <div className="nav-sep">Types</div>
           {Object.entries(TYPES).map(([k, t]) => (
             <NavBtn key={k} id={k} icon={TYPE_ICONS[k]} label={t.plural} count={counts[k]} />
+          ))}
+          <div className="nav-sep">Catégories</div>
+          {CATEGORIES.filter((c) => counts[`cat:${c.id}`]).map((c) => (
+            <button key={c.id} className={`nav-item ${view === `cat:${c.id}` ? 'active' : ''}`} onClick={() => go(`cat:${c.id}`)}>
+              <i className="cat-dot" style={{ background: c.color }} />
+              <span>{c.label}</span>
+              <em>{counts[`cat:${c.id}`]}</em>
+            </button>
           ))}
           {tags.length > 0 && <div className="nav-sep">Tags</div>}
           <div className="tag-cloud">
@@ -233,10 +278,28 @@ export default function Vault({ vault, update, lock, ctx }) {
               <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Rechercher…  (Ctrl+K)" />
               {query && <button className="icon-btn" onClick={() => setQuery('')} aria-label="Effacer"><X size={14} /></button>}
             </div>
-            <ul className="item-list">
-              {list.map((i) => {
-                const Icon = TYPE_ICONS[i.type]
-                return (
+            {view !== 'trash' && (
+              <div className="list-tools">
+                <label title="Trier">
+                  <ArrowUpDown size={14} />
+                  <select value={sortKey} onChange={(e) => updateSettings({ listSort: e.target.value })} aria-label="Trier">
+                    {Object.entries(SORTS).map(([k, o]) => <option key={k} value={k}>{o.label}</option>)}
+                  </select>
+                </label>
+                <label title="Regrouper">
+                  <Rows3 size={14} />
+                  <select value={groupKey} onChange={(e) => updateSettings({ listGroup: e.target.value })} aria-label="Regrouper">
+                    {Object.entries(GROUPS).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                  </select>
+                </label>
+                <span className="list-count">{list.length}</span>
+              </div>
+            )}
+            <div className="item-list">
+              {groups.map(([label, rows]) => (
+                <ul key={label || 'all'} className="item-group">
+                  {label && <li className="group-head"><span>{label}</span><em>{rows.length}</em></li>}
+                  {rows.map((i) => (
                   <li key={i.id}>
                     <button
                       className={`item-row ${selectedId === i.id && !draft ? 'active' : ''}`}
@@ -245,7 +308,7 @@ export default function Vault({ vault, update, lock, ctx }) {
                         setSelectedId(i.id)
                       }}
                     >
-                      <span className={`type-icon t-${i.type}`}><Icon size={16} /></span>
+                      <Avatar item={i} />
                       <span className="item-text">
                         <strong>{i.title || 'Sans titre'}</strong>
                         <small>{subtitle(i)}</small>
@@ -257,9 +320,10 @@ export default function Vault({ vault, update, lock, ctx }) {
                       </span>
                     </button>
                   </li>
-                )
-              })}
-            </ul>
+                  ))}
+                </ul>
+              ))}
+            </div>
             {!list.length && (
               <Empty icon={query ? Search : view === 'trash' ? Trash2 : Tag} title={query ? 'Aucun résultat' : view === 'trash' ? 'Corbeille vide' : 'Rien ici pour l\'instant'}>
                 {!query && view !== 'trash' && 'Clique sur « Nouveau » pour ajouter un élément.'}
@@ -284,6 +348,8 @@ export default function Vault({ vault, update, lock, ctx }) {
                 onDuplicate={() => duplicate(selected)}
                 onTag={(t) => go(`tag:${t}`)}
                 onChange={(patch) => mapItem(selected.id, (i) => ({ ...i, ...patch, updatedAt: now() }))}
+                onUsed={() => markUsed(selected.id)}
+                onCategory={(c) => go(`cat:${c}`)}
               />
             ) : (
               <div className="detail-empty">

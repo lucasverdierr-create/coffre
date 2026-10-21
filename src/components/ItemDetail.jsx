@@ -3,18 +3,32 @@ import { ArrowLeft, Pencil, Star, Trash2, RotateCcw, CopyPlus, ExternalLink, His
 import { TYPES, hostname, safeUrl } from '../lib/vault'
 import { renderMarkdown, fmtDate } from '../lib/misc'
 import { totp } from '../lib/totp'
-import { CopyButton, RevealButton, StrengthMeter } from './ui'
+import { CopyButton, RevealButton, StrengthMeter, CopyUsedCtx } from './ui'
+import { CATEGORY, categoryOf, brandOf } from '../lib/categories'
+import Avatar from './Avatar'
 
-export default function ItemDetail({ item, reused, onBack, onEdit, onFav, onTrash, onRestore, onPurge, onDuplicate, onTag, onChange }) {
+export default function ItemDetail({ item, reused, onBack, onEdit, onFav, onTrash, onRestore, onPurge, onDuplicate, onTag, onChange, onUsed, onCategory }) {
   const inTrash = Boolean(item.deletedAt)
   const url = safeUrl(item.url)
+  const cat = CATEGORY[categoryOf(item)]
+  const brand = brandOf(item)
   return (
+    <CopyUsedCtx.Provider value={inTrash ? null : onUsed}>
     <article className="detail">
       <header className="detail-head">
         <button className="icon-btn only-mobile" onClick={onBack} aria-label="Retour"><ArrowLeft size={20} /></button>
+        <Avatar item={item} size={44} />
         <div className="detail-title">
-          <small>{TYPES[item.type]?.label}</small>
+          <small>
+            {TYPES[item.type]?.label}
+            {brand && brand.name.toLowerCase() !== (item.title || '').toLowerCase() && <> · {brand.name}</>}
+          </small>
           <h2>{item.title || 'Sans titre'}</h2>
+          <button className="cat-chip" onClick={() => onCategory(cat.id)} title={item.category ? 'Catégorie choisie' : 'Catégorie détectée automatiquement'}>
+            <i className="cat-dot" style={{ background: cat.color }} />
+            {cat.label}
+            {!item.category && <em>auto</em>}
+          </button>
         </div>
         <div className="actions">
           {inTrash ? (
@@ -110,9 +124,11 @@ export default function ItemDetail({ item, reused, onBack, onEdit, onFav, onTras
           <span>Modifié le {fmtDate(item.updatedAt)}</span>
           {item.type === 'login' && item.passwordChangedAt && <span>Mot de passe changé le {fmtDate(item.passwordChangedAt)}</span>}
           {inTrash && <span>Mis à la corbeille le {fmtDate(item.deletedAt)}</span>}
+          {item.uses > 0 && <span>Copié {item.uses} fois{item.lastUsedAt ? `, la dernière le ${fmtDate(item.lastUsedAt)}` : ''}</span>}
         </footer>
       </div>
     </article>
+    </CopyUsedCtx.Provider>
   )
 }
 

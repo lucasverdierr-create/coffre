@@ -4,6 +4,9 @@ Coffre-fort personnel chiffré : mots de passe, codes 2FA, notes, snippets / pro
 
 ## Fonctionnalités
 
+- **Classement automatique** : ~200 marques et services reconnus (banques, réseaux sociaux, outils marketing, administratif…) rangés en 13 catégories, avec logo ou pastille aux couleurs de la marque ; catégorie modifiable à la main
+- **Tri et regroupement** : récents, A → Z, plus utilisés ; par catégorie ou par lettre
+- **Déverrouillage par Face ID / Touch ID / Windows Hello** (passkey + extension PRF, iOS 18 / macOS 15 minimum), à activer sur chaque appareil dans les réglages
 - **Identifiants** : site, identifiant, mot de passe, notes, historique des anciens mots de passe
 - **Codes 2FA (TOTP)** générés dans l'app (clé base32 ou lien `otpauth://`)
 - **Notes en Markdown** avec aperçu, cases à cocher, blocs de code

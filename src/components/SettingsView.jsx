@@ -1,4 +1,6 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { ScanFace, Fingerprint } from 'lucide-react'
+import { bioAvailable, bioRecord, bioLabel, enableBio, disableBio } from '../lib/biometric'
 import { Download, Upload, FileSpreadsheet, KeyRound, LogOut, Trash2, Cloud, HardDrive, Sun, Moon, Monitor, TriangleAlert, ShieldCheck } from 'lucide-react'
 import { csvToItems, itemsToCSV } from '../lib/csv'
 import { downloadFile, today, timeAgo } from '../lib/misc'
@@ -42,6 +44,7 @@ export default function SettingsView({ vault, ctx, updateSettings, importItems }
 
       <section className="card">
         <h3>Sécurité</h3>
+        <BioSetting ctx={ctx} />
         <div className="card-row">
           <div>
             <strong>Verrouillage automatique</strong>
@@ -188,6 +191,90 @@ export default function SettingsView({ vault, ctx, updateSettings, importItems }
         </Modal>
       )}
     </div>
+  )
+}
+
+function BioSetting({ ctx }) {
+  const toast = useToast()
+  const label = bioLabel()
+  const Icon = label === 'Face ID' ? ScanFace : Fingerprint
+  const [available, setAvailable] = useState(null)
+  const [on, setOn] = useState(() => Boolean(bioRecord(ctx.uid)))
+  const [asking, setAsking] = useState(false)
+  useEffect(() => {
+    bioAvailable().then(setAvailable)
+  }, [])
+
+  return (
+    <div className="card-row">
+      <div>
+        <strong><Icon size={16} /> Déverrouillage par {label}</strong>
+        <p className="help">
+          {available === false
+            ? "Non disponible sur cet appareil ou ce navigateur (il faut iOS 18 / macOS 15 ou plus récent, sur le site en https)."
+            : `Propre à cet appareil : à activer séparément sur ton iPhone et ton ordinateur. Le mot de passe maître reste nécessaire si ${label} échoue.`}
+        </p>
+      </div>
+      {on ? (
+        <button
+          className="btn ghost"
+          onClick={() => {
+            disableBio(ctx.uid)
+            setOn(false)
+            toast(`${label} désactivé sur cet appareil`)
+          }}
+        >
+          Désactiver
+        </button>
+      ) : (
+        <button className="btn primary" disabled={!available} onClick={() => setAsking(true)}>
+          Activer
+        </button>
+      )}
+      {asking && (
+        <ConfirmMasterModal
+          title={`Activer ${label}`}
+          onClose={() => setAsking(false)}
+          onSubmit={async (pw) => {
+            await ctx.verifyMaster(pw)
+            await enableBio(ctx.uid, ctx.account, pw)
+            setOn(true)
+            setAsking(false)
+            toast(`${label} activé sur cet appareil`)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+function ConfirmMasterModal({ title, onClose, onSubmit }) {
+  const [pw, setPw] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  async function submit(e) {
+    e.preventDefault()
+    setBusy(true)
+    setErr('')
+    try {
+      await onSubmit(pw)
+    } catch (e2) {
+      setErr(e2.message)
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal title={title} onClose={onClose}>
+      <form onSubmit={submit} className="form">
+        <p className="help">Confirme ton mot de passe maître. Il sera ensuite chiffré avec une clé que seule la biométrie de cet appareil peut débloquer.</p>
+        <label>Mot de passe maître<PasswordField value={pw} onChange={setPw} autoFocus autoComplete="current-password" /></label>
+        {err && <div className="notice err">{err}</div>}
+        <div className="modal-actions">
+          <button type="button" className="btn ghost" onClick={onClose}>Annuler</button>
+          <button className="btn primary" disabled={busy || !pw}>{busy ? 'Vérification…' : 'Continuer'}</button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 

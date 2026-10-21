@@ -1,10 +1,39 @@
-import { useState } from 'react'
-import { LogOut, ShieldCheck, WifiOff } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { LogOut, ShieldCheck, WifiOff, ScanFace, Fingerprint } from 'lucide-react'
+import { bioRecord, bioUnlock, bioLabel, disableBio } from '../lib/biometric'
 import { Logo, PasswordField, StrengthMeter } from './ui'
 import { strength } from '../lib/strength'
 
-export default function UnlockScreen({ probe, reason, account, onUnlock, onCreate, onSignOut, onRetry }) {
+export default function UnlockScreen({ probe, uid, reason, account, onUnlock, onCreate, onSignOut, onRetry }) {
   const exists = Boolean(probe.remote || probe.local?.envelope)
+  const [bio, setBio] = useState(() => (exists ? bioRecord(uid) : null))
+  const [showPw, setShowPw] = useState(!bio)
+  const label = bioLabel()
+  const BioIcon = label === 'Face ID' ? ScanFace : Fingerprint
+
+  async function unlockWithBio() {
+    setErr('')
+    setBusy(true)
+    try {
+      const master = await bioUnlock(uid)
+      try {
+        await onUnlock(master)
+      } catch {
+        // Le mot de passe maître a changé depuis l'activation : on désactive Face ID sur cet appareil.
+        disableBio(uid)
+        setBio(null)
+        setShowPw(true)
+        throw new Error(`Ton mot de passe maître a changé. Entre le nouveau, puis réactive ${label} dans les réglages.`)
+      }
+    } catch (e) {
+      if (!e.cancelled) setErr(e.message)
+      if (!e.cancelled && !bioRecord(uid)) setShowPw(true)
+      setBusy(false)
+    }
+  }
+  useEffect(() => {
+    if (!bio) setShowPw(true)
+  }, [bio])
   const [pw, setPw] = useState('')
   const [confirm, setConfirm] = useState('')
   const [ack, setAck] = useState(false)
@@ -64,16 +93,31 @@ export default function UnlockScreen({ probe, reason, account, onUnlock, onCreat
           <Logo size={40} />
           <div>
             <h1>{exists ? 'Coffre verrouillé' : 'Crée ton mot de passe maître'}</h1>
-            <p>{exists ? 'Entre ton mot de passe maître pour déchiffrer tes données.' : 'Il chiffre tout ton coffre. Il ne quitte jamais cet appareil.'}</p>
+            <p>{exists ? (bio && !showPw ? `Utilise ${label} ou ton mot de passe maître.` : 'Entre ton mot de passe maître pour déchiffrer tes données.') : 'Il chiffre tout ton coffre. Il ne quitte jamais cet appareil.'}</p>
           </div>
         </div>
 
         {reason && <div className="notice">{reason}</div>}
 
+        {exists && bio && (
+          <>
+            <button type="button" className="btn primary block bio-btn" onClick={unlockWithBio} disabled={busy} autoFocus>
+              <BioIcon size={20} /> {busy && !showPw ? 'Déchiffrement…' : `Déverrouiller avec ${label}`}
+            </button>
+            {!showPw && (
+              <button type="button" className="link center" onClick={() => setShowPw(true)}>
+                Utiliser mon mot de passe maître
+              </button>
+            )}
+          </>
+        )}
+
+        {showPw && (
         <label>
           Mot de passe maître
-          <PasswordField value={pw} onChange={setPw} autoFocus autoComplete={exists ? 'current-password' : 'new-password'} />
+          <PasswordField value={pw} onChange={setPw} autoFocus={!bio} autoComplete={exists ? 'current-password' : 'new-password'} />
         </label>
+        )}
 
         {!exists && (
           <>
@@ -94,9 +138,11 @@ export default function UnlockScreen({ probe, reason, account, onUnlock, onCreat
 
         {err && <div className="notice err">{err}</div>}
 
-        <button className="btn primary block" disabled={busy || !pw}>
+        {showPw && (
+        <button className={`btn block ${bio ? 'ghost' : 'primary'}`} disabled={busy || !pw}>
           {busy ? <><span className="spinner sm" /> Déchiffrement…</> : exists ? 'Déverrouiller' : 'Créer mon coffre'}
         </button>
+        )}
 
         <p className="fineprint center">
           <ShieldCheck size={13} /> AES-256-GCM · clé dérivée par PBKDF2 (600 000 itérations)
